@@ -28,6 +28,7 @@
     <script>
 // Aplikasi Paint 2D Interaktif - p5.js
 // Fitur lengkap: Drawing, Transform, Selection, Windowing & Clipping
+// Dengan algoritma clipping: Cohen-Sutherland untuk Line, Sutherland-Hodgman untuk Polygon
 
 let shapes = [];
 let selectedShapes = [];
@@ -35,7 +36,7 @@ let history = [];
 let historyIndex = -1;
 
 // State
-let mode = "select"; // select, point, line, rectangle, ellipse, window
+let mode = "select";
 let isDrawing = false;
 let startPoint = { x: 0, y: 0 };
 let currentShape = null;
@@ -55,10 +56,16 @@ let showHelp = true;
 let palette = [];
 let selectedColorIndex = 0;
 
+// Cohen-Sutherland Region Codes
+const INSIDE = 0; // 0000
+const LEFT = 1;   // 0001
+const RIGHT = 2;  // 0010
+const BOTTOM = 4; // 0100
+const TOP = 8;    // 1000
+
 function setup() {
   createCanvas(1400, 800);
   
-  // Initialize palette
   palette = [
     color(0, 0, 0),
     color(255, 0, 0),
@@ -75,8 +82,6 @@ function setup() {
   ];
   
   currentColor = palette[0];
-  
-  // Initialize history
   saveToHistory();
 }
 
@@ -86,21 +91,32 @@ function draw() {
   // Draw grid
   drawGrid();
   
-  // Apply clipping if enabled
+  // Draw shapes
   if (showClipping && clipWindow !== null) {
-    push();
-    clip(() => {
-      rect(clipWindow.x, clipWindow.y, clipWindow.w, clipWindow.h);
-    });
-    
-    // Draw all shapes
+    // Draw all shapes dimmed
     for (let s of shapes) {
+      push();
+      tint(255, 100);
       s.display();
+      pop();
     }
     
+    // Apply clipping and draw clipped shapes
+    push();
+    drawingContext.save();
+    drawingContext.beginPath();
+    drawingContext.rect(clipWindow.x, clipWindow.y, clipWindow.w, clipWindow.h);
+    drawingContext.clip();
+    
+    // Draw clipped shapes
+    for (let s of shapes) {
+      s.displayClipped(clipWindow);
+    }
+    
+    drawingContext.restore();
     pop();
   } else {
-    // Draw all shapes without clipping
+    // Draw all shapes normally
     for (let s of shapes) {
       s.display();
     }
@@ -108,10 +124,21 @@ function draw() {
   
   // Draw current shape being created
   if (currentShape !== null) {
-    currentShape.display();
+    if (showClipping && clipWindow !== null) {
+      push();
+      drawingContext.save();
+      drawingContext.beginPath();
+      drawingContext.rect(clipWindow.x, clipWindow.y, clipWindow.w, clipWindow.h);
+      drawingContext.clip();
+      currentShape.display();
+      drawingContext.restore();
+      pop();
+    } else {
+      currentShape.display();
+    }
   }
   
-  // Draw clipping window
+  // Draw clipping window border
   if (clipWindow !== null && (showClipping || isSettingWindow)) {
     clipWindow.display(isSettingWindow);
   }
@@ -142,12 +169,10 @@ function drawGrid() {
 }
 
 function drawToolbar() {
-  // Background
   fill(50);
   noStroke();
   rect(0, 0, width, 70);
   
-  // Tool buttons
   let tools = ["Select", "Point", "Line", "Rect", "Ellipse", "Window"];
   let modeNames = ["select", "point", "line", "rectangle", "ellipse", "window"];
   
@@ -156,7 +181,6 @@ function drawToolbar() {
     drawButton(x, 10, 95, 50, tools[i], mode === modeNames[i]);
   }
   
-  // Color palette
   textAlign(LEFT, CENTER);
   fill(255);
   textSize(12);
@@ -172,7 +196,6 @@ function drawToolbar() {
     rect(x, y, 25, 20);
   }
   
-  // Stroke weight slider
   fill(255);
   textAlign(LEFT, CENTER);
   text("Stroke: " + nf(strokeWeightValue, 0, 1), 880, 25);
@@ -187,17 +210,11 @@ function drawToolbar() {
   let sliderX = map(strokeWeightValue, 1, 20, 950, 1050);
   rect(950, 15, sliderX - 950, 20);
   
-  // Fill toggle
   drawButton(1070, 10, 80, 50, "Fill: " + (fillEnabled ? "ON" : "OFF"), fillEnabled);
-  
-  // Action buttons
   drawButton(1160, 10, 80, 25, "Clip: " + (showClipping ? "ON" : "OFF"), showClipping);
   drawButton(1160, 35, 80, 25, "Help", showHelp);
-  
   drawButton(1250, 10, 70, 25, "Clear", false);
   drawButton(1250, 35, 70, 25, "Save", false);
-  
-  // Undo/Redo
   drawButton(1330, 10, 60, 25, "Undo", false);
   drawButton(1330, 35, 60, 25, "Redo", false);
 }
@@ -209,7 +226,6 @@ function drawButton(x, y, w, h, label, active) {
     fill(80);
   }
   
-  // Hover effect
   if (mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h) {
     fill(active ? color(90, 150, 255) : color(100));
   }
@@ -231,23 +247,21 @@ function drawInfoBar() {
   fill(255);
   textAlign(LEFT, CENTER);
   textSize(10);
+  let clipStatus = showClipping && clipWindow ? " | CLIPPING: Cohen-Sutherland" : "";
   text("Objects: " + shapes.length + " | Selected: " + selectedShapes.length + 
-       " | Mode: " + mode.toUpperCase(), 10, 75);
+       " | Mode: " + mode.toUpperCase() + clipStatus, 10, 75);
 }
 
 function drawHelpPanel() {
-  // Panel background
   fill(0, 0, 0, 230);
   noStroke();
-  rect(10, 90, 400, 450, 10);
+  rect(10, 90, 400, 490, 10);
   
-  // Header
   fill(255, 255, 100);
   textAlign(LEFT, TOP);
   textSize(16);
   text("📋 PANDUAN KONTROL", 20, 100);
   
-  // Close button
   fill(200, 50, 50);
   rect(370, 95, 30, 30, 5);
   fill(255);
@@ -255,7 +269,6 @@ function drawHelpPanel() {
   textSize(20);
   text("×", 385, 110);
   
-  // Content
   fill(255);
   textAlign(LEFT, TOP);
   textSize(11);
@@ -277,10 +290,14 @@ function drawHelpPanel() {
     "  • Ctrl+Y: Redo",
     "  • Escape: Batal seleksi",
     "",
-    "🪟 CLIPPING WINDOW:",
+    "🪟 CLIPPING WINDOW (Cohen-Sutherland):",
     "  • Pilih mode Window",
     "  • Drag mouse untuk set area clipping",
     "  • Klik tombol 'Clip' atau tekan C untuk aktifkan",
+    "  • Gambar yang keluar window DIPOTONG di batas",
+    "  • Line: Cohen-Sutherland line clipping",
+    "  • Rect/Ellipse: Sutherland-Hodgman polygon clipping",
+    "  • Area di luar window akan redup",
     "",
     "🎨 ATRIBUT GAMBAR:",
     "  • Klik warna di palette untuk mengubah warna",
@@ -301,19 +318,16 @@ function drawHelpPanel() {
 }
 
 function mousePressed() {
-  // Check UI clicks
   if (mouseY < 70) {
     handleUIClick();
     return;
   }
   
-  // Check help close button
   if (showHelp && mouseX > 370 && mouseX < 400 && mouseY > 95 && mouseY < 125) {
     showHelp = false;
     return;
   }
   
-  // Drawing area
   isDrawing = true;
   startPoint.x = mouseX;
   startPoint.y = mouseY;
@@ -328,7 +342,6 @@ function mousePressed() {
     shapes.push(p);
     saveToHistory();
   } else {
-    // Start creating shape
     if (mode === "line") {
       currentShape = new Line(mouseX, mouseY, mouseX, mouseY, currentColor, strokeWeightValue, fillEnabled);
     } else if (mode === "rectangle") {
@@ -371,7 +384,6 @@ function mouseReleased() {
   }
   
   if (isSettingWindow && clipWindow !== null) {
-    // Normalize window
     if (clipWindow.w < 0) {
       clipWindow.x += clipWindow.w;
       clipWindow.w = abs(clipWindow.w);
@@ -387,7 +399,6 @@ function mouseReleased() {
 }
 
 function handleUIClick() {
-  // Tool buttons
   let modeNames = ["select", "point", "line", "rectangle", "ellipse", "window"];
   for (let i = 0; i < 6; i++) {
     let x = 10 + i * 100;
@@ -400,14 +411,12 @@ function handleUIClick() {
     }
   }
   
-  // Color palette
   for (let i = 0; i < palette.length; i++) {
     let x = 690 + (i % 6) * 30;
     let y = 10 + floor(i / 6) * 25;
     if (mouseX > x && mouseX < x + 25 && mouseY > y && mouseY < y + 20) {
       currentColor = palette[i];
       selectedColorIndex = i;
-      // Update selected shapes
       for (let s of selectedShapes) {
         s.col = currentColor;
       }
@@ -415,7 +424,6 @@ function handleUIClick() {
     }
   }
   
-  // Stroke weight slider
   if (mouseX > 950 && mouseX < 1050 && mouseY > 15 && mouseY < 35) {
     strokeWeightValue = map(mouseX, 950, 1050, 1, 20);
     for (let s of selectedShapes) {
@@ -424,25 +432,21 @@ function handleUIClick() {
     return;
   }
   
-  // Fill toggle
   if (mouseX > 1070 && mouseX < 1150 && mouseY > 10 && mouseY < 60) {
     fillEnabled = !fillEnabled;
     return;
   }
   
-  // Clip toggle
   if (mouseX > 1160 && mouseX < 1240 && mouseY > 10 && mouseY < 35) {
     showClipping = !showClipping;
     return;
   }
   
-  // Help toggle
   if (mouseX > 1160 && mouseX < 1240 && mouseY > 35 && mouseY < 60) {
     showHelp = !showHelp;
     return;
   }
   
-  // Clear button
   if (mouseX > 1250 && mouseX < 1320 && mouseY > 10 && mouseY < 35) {
     if (shapes.length > 0) {
       shapes = [];
@@ -453,19 +457,16 @@ function handleUIClick() {
     return;
   }
   
-  // Save button
   if (mouseX > 1250 && mouseX < 1320 && mouseY > 35 && mouseY < 60) {
     saveImage();
     return;
   }
   
-  // Undo
   if (mouseX > 1330 && mouseX < 1390 && mouseY > 10 && mouseY < 35) {
     undo();
     return;
   }
   
-  // Redo
   if (mouseX > 1330 && mouseX < 1390 && mouseY > 35 && mouseY < 60) {
     redo();
     return;
@@ -500,7 +501,6 @@ function handleSelection() {
 }
 
 function keyPressed() {
-  // Global shortcuts
   if (key === 'c' || key === 'C') {
     showClipping = !showClipping;
     return;
@@ -517,7 +517,7 @@ function keyPressed() {
       selectedShapes.push(s);
     }
     mode = "select";
-    return false; // Prevent default
+    return false;
   }
   
   if ((keyIsDown(CONTROL) || keyIsDown(91)) && (key === 'z' || key === 'Z')) {
@@ -530,7 +530,6 @@ function keyPressed() {
     return false;
   }
   
-  // Transform selected shapes
   if (selectedShapes.length === 0) return;
   
   let needsSave = true;
@@ -562,7 +561,6 @@ function keyPressed() {
     }
   }
   
-  // Delete selected
   if (keyCode === DELETE || keyCode === BACKSPACE) {
     shapes = shapes.filter(s => !selectedShapes.includes(s));
     selectedShapes = [];
@@ -571,7 +569,6 @@ function keyPressed() {
     saveToHistory();
   }
   
-  // Prevent default for arrow keys
   if (keyCode === UP_ARROW || keyCode === DOWN_ARROW || 
       keyCode === LEFT_ARROW || keyCode === RIGHT_ARROW) {
     return false;
@@ -579,12 +576,10 @@ function keyPressed() {
 }
 
 function saveToHistory() {
-  // Remove future history if we're not at the end
   while (history.length > historyIndex + 1) {
     history.pop();
   }
   
-  // Clone current shapes
   let snapshot = [];
   for (let s of shapes) {
     snapshot.push(s.clone());
@@ -593,7 +588,6 @@ function saveToHistory() {
   history.push(snapshot);
   historyIndex++;
   
-  // Limit history size
   if (history.length > 50) {
     history.shift();
     historyIndex--;
@@ -629,6 +623,113 @@ function saveImage() {
   console.log("Image saved as: " + filename);
 }
 
+// ==================== CLIPPING ALGORITHMS ====================
+
+// Cohen-Sutherland Line Clipping
+function computeRegionCode(x, y, clip) {
+  let code = INSIDE;
+  
+  if (x < clip.x) code |= LEFT;
+  else if (x > clip.x + clip.w) code |= RIGHT;
+  
+  if (y < clip.y) code |= TOP;
+  else if (y > clip.y + clip.h) code |= BOTTOM;
+  
+  return code;
+}
+
+function cohenSutherlandClip(x1, y1, x2, y2, clip) {
+  let code1 = computeRegionCode(x1, y1, clip);
+  let code2 = computeRegionCode(x2, y2, clip);
+  let accept = false;
+  
+  while (true) {
+    if ((code1 | code2) === 0) {
+      // Both points inside
+      accept = true;
+      break;
+    } else if (code1 & code2) {
+      // Both points outside same region
+      break;
+    } else {
+      // Line needs clipping
+      let x, y;
+      let codeOut = code1 ? code1 : code2;
+      
+      if (codeOut & TOP) {
+        x = x1 + (x2 - x1) * (clip.y - y1) / (y2 - y1);
+        y = clip.y;
+      } else if (codeOut & BOTTOM) {
+        x = x1 + (x2 - x1) * (clip.y + clip.h - y1) / (y2 - y1);
+        y = clip.y + clip.h;
+      } else if (codeOut & RIGHT) {
+        y = y1 + (y2 - y1) * (clip.x + clip.w - x1) / (x2 - x1);
+        x = clip.x + clip.w;
+      } else if (codeOut & LEFT) {
+        y = y1 + (y2 - y1) * (clip.x - x1) / (x2 - x1);
+        x = clip.x;
+      }
+      
+      if (codeOut === code1) {
+        x1 = x;
+        y1 = y;
+        code1 = computeRegionCode(x1, y1, clip);
+      } else {
+        x2 = x;
+        y2 = y;
+        code2 = computeRegionCode(x2, y2, clip);
+      }
+    }
+  }
+  
+  if (accept) {
+    return { x1, y1, x2, y2, visible: true };
+  }
+  return { visible: false };
+}
+
+// Sutherland-Hodgman Polygon Clipping (simplified for rectangles)
+function clipPolygonEdge(vertices, edgeX1, edgeY1, edgeX2, edgeY2) {
+  let output = [];
+  
+  for (let i = 0; i < vertices.length; i++) {
+    let curr = vertices[i];
+    let next = vertices[(i + 1) % vertices.length];
+    
+    let currInside = isLeftOfEdge(curr.x, curr.y, edgeX1, edgeY1, edgeX2, edgeY2);
+    let nextInside = isLeftOfEdge(next.x, next.y, edgeX1, edgeY1, edgeX2, edgeY2);
+    
+    if (currInside && nextInside) {
+      output.push(next);
+    } else if (currInside && !nextInside) {
+      let intersection = lineIntersection(curr.x, curr.y, next.x, next.y, edgeX1, edgeY1, edgeX2, edgeY2);
+      if (intersection) output.push(intersection);
+    } else if (!currInside && nextInside) {
+      let intersection = lineIntersection(curr.x, curr.y, next.x, next.y, edgeX1, edgeY1, edgeX2, edgeY2);
+      if (intersection) output.push(intersection);
+      output.push(next);
+    }
+  }
+  
+  return output;
+}
+
+function isLeftOfEdge(px, py, x1, y1, x2, y2) {
+  return ((x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)) >= 0;
+}
+
+function lineIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
+  let denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (abs(denom) < 0.001) return null;
+  
+  let t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  
+  return {
+    x: x1 + t * (x2 - x1),
+    y: y1 + t * (y2 - y1)
+  };
+}
+
 // ==================== CLASSES ====================
 
 class Shape {
@@ -639,6 +740,7 @@ class Shape {
   }
   
   display() {}
+  displayClipped(clip) { this.display(); }
   contains(x, y) { return false; }
   translate(dx, dy) {}
   rotate(angle) {}
@@ -658,6 +760,14 @@ class Point extends Shape {
     fill(this.col);
     noStroke();
     circle(this.x, this.y, this.strokeW * 4);
+  }
+  
+  displayClipped(clip) {
+    // Point is only visible if inside clip window
+    if (this.x >= clip.x && this.x <= clip.x + clip.w &&
+        this.y >= clip.y && this.y <= clip.y + clip.h) {
+      this.display();
+    }
   }
   
   contains(px, py) {
@@ -700,6 +810,17 @@ class Line extends Shape {
     stroke(this.col);
     strokeWeight(this.strokeW);
     line(this.x1, this.y1, this.x2, this.y2);
+  }
+  
+  displayClipped(clip) {
+    // Cohen-Sutherland line clipping
+    let clipped = cohenSutherlandClip(this.x1, this.y1, this.x2, this.y2, clip);
+    
+    if (clipped.visible) {
+      stroke(this.col);
+      strokeWeight(this.strokeW);
+      line(clipped.x1, clipped.y1, clipped.x2, clipped.y2);
+    }
   }
   
   contains(px, py) {
@@ -786,6 +907,41 @@ class Rectangle extends Shape {
     rect(this.x, this.y, this.w, this.h);
   }
   
+  displayClipped(clip) {
+    // Sutherland-Hodgman polygon clipping for rectangle
+    let vertices = [
+      { x: this.x, y: this.y },
+      { x: this.x + this.w, y: this.y },
+      { x: this.x + this.w, y: this.y + this.h },
+      { x: this.x, y: this.y + this.h }
+    ];
+    
+    // Clip against all four edges
+    vertices = clipPolygonEdge(vertices, clip.x, clip.y, clip.x + clip.w, clip.y); // Top
+    if (vertices.length === 0) return;
+    vertices = clipPolygonEdge(vertices, clip.x + clip.w, clip.y, clip.x + clip.w, clip.y + clip.h); // Right
+    if (vertices.length === 0) return;
+    vertices = clipPolygonEdge(vertices, clip.x + clip.w, clip.y + clip.h, clip.x, clip.y + clip.h); // Bottom
+    if (vertices.length === 0) return;
+    vertices = clipPolygonEdge(vertices, clip.x, clip.y + clip.h, clip.x, clip.y); // Left
+    
+    if (vertices.length > 0) {
+      if (this.fill) {
+        fill(this.col);
+      } else {
+        noFill();
+      }
+      stroke(this.col);
+      strokeWeight(this.strokeW);
+      
+      beginShape();
+      for (let v of vertices) {
+        vertex(v.x, v.y);
+      }
+      endShape(CLOSE);
+    }
+  }
+  
   contains(px, py) {
     return px >= this.x && px <= this.x + this.w && 
            py >= this.y && py <= this.y + this.h;
@@ -796,9 +952,7 @@ class Rectangle extends Shape {
     this.y += dy;
   }
   
-  rotate(angle) {
-    // Simple rotation not implemented for rectangles
-  }
+  rotate(angle) {}
   
   scale(factor) {
     let cx = this.x + this.w / 2;
@@ -841,6 +995,47 @@ class Ellipse extends Shape {
     ellipse(this.x + this.w/2, this.y + this.h/2, this.w, this.h);
   }
   
+  displayClipped(clip) {
+    // Approximate ellipse as polygon for clipping
+    let cx = this.x + this.w / 2;
+    let cy = this.y + this.h / 2;
+    let vertices = [];
+    let segments = 32;
+    
+    for (let i = 0; i < segments; i++) {
+      let angle = (i / segments) * TWO_PI;
+      vertices.push({
+        x: cx + cos(angle) * this.w / 2,
+        y: cy + sin(angle) * this.h / 2
+      });
+    }
+    
+    // Clip against all four edges
+    vertices = clipPolygonEdge(vertices, clip.x, clip.y, clip.x + clip.w, clip.y);
+    if (vertices.length === 0) return;
+    vertices = clipPolygonEdge(vertices, clip.x + clip.w, clip.y, clip.x + clip.w, clip.y + clip.h);
+    if (vertices.length === 0) return;
+    vertices = clipPolygonEdge(vertices, clip.x + clip.w, clip.y + clip.h, clip.x, clip.y + clip.h);
+    if (vertices.length === 0) return;
+    vertices = clipPolygonEdge(vertices, clip.x, clip.y + clip.h, clip.x, clip.y);
+    
+    if (vertices.length > 0) {
+      if (this.fill) {
+        fill(this.col);
+      } else {
+        noFill();
+      }
+      stroke(this.col);
+      strokeWeight(this.strokeW);
+      
+      beginShape();
+      for (let v of vertices) {
+        vertex(v.x, v.y);
+      }
+      endShape(CLOSE);
+    }
+  }
+  
   contains(px, py) {
     let cx = this.x + this.w / 2;
     let cy = this.y + this.h / 2;
@@ -854,9 +1049,7 @@ class Ellipse extends Shape {
     this.y += dy;
   }
   
-  rotate(angle) {
-    // Simple rotation not implemented for ellipses
-  }
+  rotate(angle) {}
   
   scale(factor) {
     let cx = this.x + this.w / 2;
@@ -894,7 +1087,7 @@ class ClipWindow {
       stroke(0, 0, 255);
     }
     
-    strokeWeight(2);
+    strokeWeight(3);
     noFill();
     rect(this.x, this.y, this.w, this.h);
     
@@ -907,6 +1100,7 @@ class ClipWindow {
     textSize(12);
     text("CLIP WINDOW", this.x + this.w/2, this.y - 5);
   }
-}    </script>
+}
+    </script>
 </body>
 </html>
