@@ -28,7 +28,6 @@
     <script>
 // Aplikasi Paint 2D Interaktif - p5.js
 // Fitur lengkap: Drawing, Transform, Selection, Windowing & Clipping
-// Dengan Algoritma: Cohen-Sutherland Line Clipping & Sutherland-Hodgman Polygon Clipping
 
 let shapes = [];
 let selectedShapes = [];
@@ -56,13 +55,6 @@ let showHelp = true;
 let palette = [];
 let selectedColorIndex = 0;
 
-// Cohen-Sutherland Region Codes
-const INSIDE = 0;
-const LEFT = 1;
-const RIGHT = 2;
-const BOTTOM = 4;
-const TOP = 8;
-
 function setup() {
   createCanvas(1400, 800);
   
@@ -89,17 +81,8 @@ function draw() {
   background(255);
   drawGrid();
   
-  // Draw shapes with clipping
+  // Apply clipping if enabled
   if (showClipping && clipWindow !== null) {
-    // Draw dimmed shapes
-    for (let s of shapes) {
-      push();
-      tint(255, 100);
-      s.display();
-      pop();
-    }
-    
-    // Draw clipped shapes
     push();
     drawingContext.save();
     drawingContext.beginPath();
@@ -107,7 +90,7 @@ function draw() {
     drawingContext.clip();
     
     for (let s of shapes) {
-      s.displayClipped(clipWindow);
+      s.display();
     }
     
     drawingContext.restore();
@@ -120,18 +103,7 @@ function draw() {
   
   // Draw current shape
   if (currentShape !== null) {
-    if (showClipping && clipWindow !== null) {
-      push();
-      drawingContext.save();
-      drawingContext.beginPath();
-      drawingContext.rect(clipWindow.x, clipWindow.y, clipWindow.w, clipWindow.h);
-      drawingContext.clip();
-      currentShape.display();
-      drawingContext.restore();
-      pop();
-    } else {
-      currentShape.display();
-    }
+    currentShape.display();
   }
   
   // Draw clipping window
@@ -243,9 +215,8 @@ function drawInfoBar() {
   fill(255);
   textAlign(LEFT, CENTER);
   textSize(10);
-  let clipStatus = showClipping && clipWindow ? " | CLIPPING: Cohen-Sutherland" : "";
   text("Objects: " + shapes.length + " | Selected: " + selectedShapes.length + 
-       " | Mode: " + mode.toUpperCase() + clipStatus, 10, 75);
+       " | Mode: " + mode.toUpperCase(), 10, 75);
 }
 
 function drawHelpPanel() {
@@ -301,11 +272,10 @@ function drawHelpPanel() {
     "    • Ctrl+S: Save image",
     "    • Escape: Clear selection",
     "",
-    "🪟 CLIPPING (Cohen-Sutherland):",
+    "🪟 CLIPPING WINDOW:",
     "  • Tekan W untuk Window mode",
     "  • Drag mouse untuk set area",
     "  • Tekan C untuk aktifkan clipping",
-    "  • Gambar dipotong tepat di boundary",
     "",
     "💡 TIPS:",
     "  • Klik warna di palette untuk ganti warna",
@@ -503,6 +473,26 @@ function handleSelection() {
 }
 
 function keyPressed() {
+  // Handle arrow keys FIRST (for selected shapes)
+  if (keyCode === UP_ARROW || keyCode === DOWN_ARROW || 
+      keyCode === LEFT_ARROW || keyCode === RIGHT_ARROW) {
+    if (selectedShapes.length > 0) {
+      for (let s of selectedShapes) {
+        if (keyCode === UP_ARROW) {
+          s.translate(0, -10);
+        } else if (keyCode === DOWN_ARROW) {
+          s.translate(0, 10);
+        } else if (keyCode === LEFT_ARROW) {
+          s.translate(-10, 0);
+        } else if (keyCode === RIGHT_ARROW) {
+          s.translate(10, 0);
+        }
+      }
+      saveToHistory();
+      return false;
+    }
+  }
+  
   // Tool shortcuts (without Ctrl)
   if (!keyIsDown(CONTROL) && !keyIsDown(91)) {
     if (key === 'v' || key === 'V') {
@@ -588,15 +578,7 @@ function keyPressed() {
   let needsSave = true;
   
   for (let s of selectedShapes) {
-    if (keyCode === UP_ARROW) {
-      s.translate(0, -10);
-    } else if (keyCode === DOWN_ARROW) {
-      s.translate(0, 10);
-    } else if (keyCode === LEFT_ARROW) {
-      s.translate(-10, 0);
-    } else if (keyCode === RIGHT_ARROW) {
-      s.translate(10, 0);
-    } else if (key === 'r') {
+    if (key === 'r') {
       s.rotate(-radians(15));
     } else if (key === 'R') {
       s.rotate(radians(15));
@@ -676,108 +658,6 @@ function saveImage() {
   console.log("Image saved as: " + filename);
 }
 
-// ==================== CLIPPING ALGORITHMS ====================
-
-function computeRegionCode(x, y, clip) {
-  let code = INSIDE;
-  
-  if (x < clip.x) code |= LEFT;
-  else if (x > clip.x + clip.w) code |= RIGHT;
-  
-  if (y < clip.y) code |= TOP;
-  else if (y > clip.y + clip.h) code |= BOTTOM;
-  
-  return code;
-}
-
-function cohenSutherlandClip(x1, y1, x2, y2, clip) {
-  let code1 = computeRegionCode(x1, y1, clip);
-  let code2 = computeRegionCode(x2, y2, clip);
-  let accept = false;
-  
-  while (true) {
-    if ((code1 | code2) === 0) {
-      accept = true;
-      break;
-    } else if (code1 & code2) {
-      break;
-    } else {
-      let x, y;
-      let codeOut = code1 ? code1 : code2;
-      
-      if (codeOut & TOP) {
-        x = x1 + (x2 - x1) * (clip.y - y1) / (y2 - y1);
-        y = clip.y;
-      } else if (codeOut & BOTTOM) {
-        x = x1 + (x2 - x1) * (clip.y + clip.h - y1) / (y2 - y1);
-        y = clip.y + clip.h;
-      } else if (codeOut & RIGHT) {
-        y = y1 + (y2 - y1) * (clip.x + clip.w - x1) / (x2 - x1);
-        x = clip.x + clip.w;
-      } else if (codeOut & LEFT) {
-        y = y1 + (y2 - y1) * (clip.x - x1) / (x2 - x1);
-        x = clip.x;
-      }
-      
-      if (codeOut === code1) {
-        x1 = x;
-        y1 = y;
-        code1 = computeRegionCode(x1, y1, clip);
-      } else {
-        x2 = x;
-        y2 = y;
-        code2 = computeRegionCode(x2, y2, clip);
-      }
-    }
-  }
-  
-  if (accept) {
-    return { x1, y1, x2, y2, visible: true };
-  }
-  return { visible: false };
-}
-
-function clipPolygonEdge(vertices, edgeX1, edgeY1, edgeX2, edgeY2) {
-  let output = [];
-  
-  for (let i = 0; i < vertices.length; i++) {
-    let curr = vertices[i];
-    let next = vertices[(i + 1) % vertices.length];
-    
-    let currInside = isLeftOfEdge(curr.x, curr.y, edgeX1, edgeY1, edgeX2, edgeY2);
-    let nextInside = isLeftOfEdge(next.x, next.y, edgeX1, edgeY1, edgeX2, edgeY2);
-    
-    if (currInside && nextInside) {
-      output.push({ x: next.x, y: next.y });
-    } else if (currInside && !nextInside) {
-      let intersection = lineIntersection(curr.x, curr.y, next.x, next.y, edgeX1, edgeY1, edgeX2, edgeY2);
-      if (intersection) output.push(intersection);
-    } else if (!currInside && nextInside) {
-      let intersection = lineIntersection(curr.x, curr.y, next.x, next.y, edgeX1, edgeY1, edgeX2, edgeY2);
-      if (intersection) output.push(intersection);
-      output.push({ x: next.x, y: next.y });
-    }
-  }
-  
-  return output;
-}
-
-function isLeftOfEdge(px, py, x1, y1, x2, y2) {
-  return ((x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)) >= 0;
-}
-
-function lineIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
-  let denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-  if (abs(denom) < 0.001) return null;
-  
-  let t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
-  
-  return {
-    x: x1 + t * (x2 - x1),
-    y: y1 + t * (y2 - y1)
-  };
-}
-
 // ==================== CLASSES ====================
 
 class Shape {
@@ -788,7 +668,6 @@ class Shape {
   }
   
   display() {}
-  displayClipped(clip) { this.display(); }
   contains(x, y) { return false; }
   translate(dx, dy) {}
   rotate(angle) {}
@@ -808,13 +687,6 @@ class Point extends Shape {
     fill(this.col);
     noStroke();
     circle(this.x, this.y, this.strokeW * 4);
-  }
-  
-  displayClipped(clip) {
-    if (this.x >= clip.x && this.x <= clip.x + clip.w &&
-        this.y >= clip.y && this.y <= clip.y + clip.h) {
-      this.display();
-    }
   }
   
   contains(px, py) {
@@ -857,16 +729,6 @@ class Line extends Shape {
     stroke(this.col);
     strokeWeight(this.strokeW);
     line(this.x1, this.y1, this.x2, this.y2);
-  }
-  
-  displayClipped(clip) {
-    let clipped = cohenSutherlandClip(this.x1, this.y1, this.x2, this.y2, clip);
-    
-    if (clipped.visible) {
-      stroke(this.col);
-      strokeWeight(this.strokeW);
-      line(clipped.x1, clipped.y1, clipped.x2, clipped.y2);
-    }
   }
   
   contains(px, py) {
@@ -953,39 +815,6 @@ class Rectangle extends Shape {
     rect(this.x, this.y, this.w, this.h);
   }
   
-  displayClipped(clip) {
-    let vertices = [
-      { x: this.x, y: this.y },
-      { x: this.x + this.w, y: this.y },
-      { x: this.x + this.w, y: this.y + this.h },
-      { x: this.x, y: this.y + this.h }
-    ];
-    
-    vertices = clipPolygonEdge(vertices, clip.x, clip.y, clip.x + clip.w, clip.y);
-    if (vertices.length === 0) return;
-    vertices = clipPolygonEdge(vertices, clip.x + clip.w, clip.y, clip.x + clip.w, clip.y + clip.h);
-    if (vertices.length === 0) return;
-    vertices = clipPolygonEdge(vertices, clip.x + clip.w, clip.y + clip.h, clip.x, clip.y + clip.h);
-    if (vertices.length === 0) return;
-    vertices = clipPolygonEdge(vertices, clip.x, clip.y + clip.h, clip.x, clip.y);
-    
-    if (vertices.length > 0) {
-      if (this.fill) {
-        fill(this.col);
-      } else {
-        noFill();
-      }
-      stroke(this.col);
-      strokeWeight(this.strokeW);
-      
-      beginShape();
-      for (let v of vertices) {
-        vertex(v.x, v.y);
-      }
-      endShape(CLOSE);
-    }
-  }
-  
   contains(px, py) {
     return px >= this.x && px <= this.x + this.w && 
            py >= this.y && py <= this.y + this.h;
@@ -1039,45 +868,6 @@ class Ellipse extends Shape {
     ellipse(this.x + this.w/2, this.y + this.h/2, this.w, this.h);
   }
   
-  displayClipped(clip) {
-    let cx = this.x + this.w / 2;
-    let cy = this.y + this.h / 2;
-    let vertices = [];
-    let segments = 32;
-    
-    for (let i = 0; i < segments; i++) {
-      let angle = (i / segments) * TWO_PI;
-      vertices.push({
-        x: cx + cos(angle) * this.w / 2,
-        y: cy + sin(angle) * this.h / 2
-      });
-    }
-    
-    vertices = clipPolygonEdge(vertices, clip.x, clip.y, clip.x + clip.w, clip.y);
-    if (vertices.length === 0) return;
-    vertices = clipPolygonEdge(vertices, clip.x + clip.w, clip.y, clip.x + clip.w, clip.y + clip.h);
-    if (vertices.length === 0) return;
-    vertices = clipPolygonEdge(vertices, clip.x + clip.w, clip.y + clip.h, clip.x, clip.y + clip.h);
-    if (vertices.length === 0) return;
-    vertices = clipPolygonEdge(vertices, clip.x, clip.y + clip.h, clip.x, clip.y);
-    
-    if (vertices.length > 0) {
-      if (this.fill) {
-        fill(this.col);
-      } else {
-        noFill();
-      }
-      stroke(this.col);
-      strokeWeight(this.strokeW);
-      
-      beginShape();
-      for (let v of vertices) {
-        vertex(v.x, v.y);
-      }
-      endShape(CLOSE);
-    }
-  }
-  
   contains(px, py) {
     let cx = this.x + this.w / 2;
     let cy = this.y + this.h / 2;
@@ -1129,7 +919,7 @@ class ClipWindow {
       stroke(0, 0, 255);
     }
     
-    strokeWeight(3);
+    strokeWeight(2);
     noFill();
     rect(this.x, this.y, this.w, this.h);
     
