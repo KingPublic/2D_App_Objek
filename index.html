@@ -255,7 +255,7 @@ function drawInfoBar() {
 function drawHelpPanel() {
   fill(0, 0, 0, 230);
   noStroke();
-  rect(10, 90, 400, 490, 10);
+  rect(10, 90, 420, 550, 10);
   
   fill(255, 255, 100);
   textAlign(LEFT, TOP);
@@ -263,11 +263,11 @@ function drawHelpPanel() {
   text("📋 PANDUAN KONTROL", 20, 100);
   
   fill(200, 50, 50);
-  rect(370, 95, 30, 30, 5);
+  rect(390, 95, 30, 30, 5);
   fill(255);
   textAlign(CENTER, CENTER);
   textSize(20);
-  text("×", 385, 110);
+  text("×", 405, 110);
   
   fill(255);
   textAlign(LEFT, TOP);
@@ -280,34 +280,40 @@ function drawHelpPanel() {
     "  • Drag: Gambar shape (garis, persegi, elips)",
     "  • Shift+Klik: Multi-select objek",
     "",
-    "⌨️ KEYBOARD (objek terpilih):",
-    "  • Arrow Keys (↑↓←→): Geser objek",
-    "  • R/r: Rotasi searah/berlawanan jarum jam",
-    "  • +/-: Perbesar/perkecil objek (10%)",
-    "  • Delete/Backspace: Hapus objek",
-    "  • Ctrl+A: Pilih semua objek",
-    "  • Ctrl+Z: Undo",
-    "  • Ctrl+Y: Redo",
-    "  • Escape: Batal seleksi",
+    "⌨️ KEYBOARD SHORTCUTS:",
+    "  🎨 Tools:",
+    "    • V: Select tool",
+    "    • P: Point tool",
+    "    • L: Line tool",
+    "    • B: Box/Rectangle tool",
+    "    • E: Ellipse tool",
+    "    • W: Window/Clipping tool",
     "",
-    "🪟 CLIPPING WINDOW (Cohen-Sutherland):",
-    "  • Pilih mode Window",
-    "  • Drag mouse untuk set area clipping",
-    "  • Klik tombol 'Clip' atau tekan C untuk aktifkan",
-    "  • Gambar yang keluar window DIPOTONG di batas",
-    "  • Line: Cohen-Sutherland line clipping",
-    "  • Rect/Ellipse: Sutherland-Hodgman polygon clipping",
-    "  • Area di luar window akan redup",
+    "  ✏️ Transform (objek terpilih):",
+    "    • Arrow Keys (↑↓←→): Geser objek",
+    "    • R/r: Rotasi +15°/-15°",
+    "    • +/-: Scale 110%/90%",
+    "    • Delete/Backspace: Hapus objek",
     "",
-    "🎨 ATRIBUT GAMBAR:",
-    "  • Klik warna di palette untuk mengubah warna",
-    "  • Drag slider untuk ubah ketebalan garis",
-    "  • Toggle Fill untuk mengisi warna solid",
+    "  🔧 Other:",
+    "    • C: Toggle clipping ON/OFF",
+    "    • F: Toggle fill ON/OFF",
+    "    • H: Toggle help panel",
+    "    • Ctrl+A: Select all",
+    "    • Ctrl+Z: Undo",
+    "    • Ctrl+Y: Redo",
+    "    • Ctrl+S: Save image",
+    "    • Escape: Clear selection",
     "",
-    "💾 LAINNYA:",
-    "  • Save: Simpan gambar sebagai PNG",
-    "  • Clear: Hapus semua objek",
-    "  • H: Toggle panduan ini"
+    "🪟 CLIPPING (Cohen-Sutherland):",
+    "  • Tekan W untuk Window mode",
+    "  • Drag mouse untuk set area",
+    "  • Tekan C untuk aktifkan clipping",
+    "  • Gambar dipotong tepat di boundary",
+    "",
+    "💡 TIPS:",
+    "  • Klik warna di palette untuk ganti warna",
+    "  • Drag slider untuk ubah ketebalan garis"
   ];
   
   let y = 140;
@@ -323,7 +329,7 @@ function mousePressed() {
     return;
   }
   
-  if (showHelp && mouseX > 370 && mouseX < 400 && mouseY > 95 && mouseY < 125) {
+  if (showHelp && mouseX > 390 && mouseX < 420 && mouseY > 95 && mouseY < 125) {
     showHelp = false;
     return;
   }
@@ -501,16 +507,61 @@ function handleSelection() {
 }
 
 function keyPressed() {
-  if (key === 'c' || key === 'C') {
-    showClipping = !showClipping;
-    return;
+  // Tool shortcuts (without Ctrl)
+  if (!keyIsDown(CONTROL) && !keyIsDown(91)) {
+    if (key === 'v' || key === 'V') {
+      mode = "select";
+      selectedShapes = [];
+      return;
+    }
+    
+    if (key === 'p' || key === 'P') {
+      mode = "point";
+      selectedShapes = [];
+      return;
+    }
+    
+    if (key === 'l' || key === 'L') {
+      mode = "line";
+      selectedShapes = [];
+      return;
+    }
+    
+    if (key === 'b' || key === 'B') {
+      mode = "rectangle";
+      selectedShapes = [];
+      return;
+    }
+    
+    if (key === 'e' || key === 'E') {
+      mode = "ellipse";
+      selectedShapes = [];
+      return;
+    }
+    
+    if (key === 'w' || key === 'W') {
+      mode = "window";
+      selectedShapes = [];
+      return;
+    }
+    
+    if (key === 'c' || key === 'C') {
+      showClipping = !showClipping;
+      return;
+    }
+    
+    if (key === 'h' || key === 'H') {
+      showHelp = !showHelp;
+      return;
+    }
+    
+    if (key === 'f' || key === 'F') {
+      fillEnabled = !fillEnabled;
+      return;
+    }
   }
   
-  if (key === 'h' || key === 'H') {
-    showHelp = !showHelp;
-    return;
-  }
-  
+  // Ctrl shortcuts
   if ((keyIsDown(CONTROL) || keyIsDown(91)) && (key === 'a' || key === 'A')) {
     selectedShapes = [];
     for (let s of shapes) {
@@ -527,6 +578,11 @@ function keyPressed() {
   
   if ((keyIsDown(CONTROL) || keyIsDown(91)) && (key === 'y' || key === 'Y')) {
     redo();
+    return false;
+  }
+  
+  if ((keyIsDown(CONTROL) || keyIsDown(91)) && (key === 's' || key === 'S')) {
+    saveImage();
     return false;
   }
   
